@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <!-- Basic -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <!-- Mobile Metas -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <!-- Site Metas -->
+  <meta name="keywords" content="" />
+  <meta name="description" content="" />
+  <meta name="author" content="" />
+
+  <title>Pave the Way</title>
+
+  <!-- slider stylesheet -->
+  <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/OwlCarousel2/2.1.3/assets/owl.carousel.min.css" />
+
+  <!-- bootstrap core css -->
+  <link rel="stylesheet" type="text/css" href="css/bootstrap.css" />
+
+  <!-- fonts style -->
+  <link href="https://fonts.googleapis.com/css?family=Poppins:400,600,700&display=swap" rel="stylesheet">
+  <!-- Custom styles for this template -->
+  <link href="css/style.css" rel="stylesheet" />
+  <!-- responsive style -->
+  <link href="css/responsive.css" rel="stylesheet" />
+ 
+
+
+</head>
+
+<body class="sub_page">
+
+    <div class="hero_area">
+      <!-- header section strats -->
+      <header class="header_section">
+        <div class="container">
+          <nav class="navbar navbar-expand-lg custom_nav-container ">
+            <a class="navbar-brand" href="index.html">
+              <img src="images/logo.gif" alt="">
+              <span>
+                XOR Group
+              </span>
+            </a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+              <span class="s-1"> </span>
+              <span class="s-2"> </span>
+              <span class="s-3"> </span>
+            </button>
+  
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+              <div class="d-flex ml-auto flex-column flex-lg-row align-items-center">
+                <ul class="navbar-nav  ">
+                  <li class="nav-item ">
+                    <a class="nav-link" href="index.html">Home <span class="sr-only">(current)</span></a>
+                  </li>
+                  <li class="nav-item active">
+                    <a class="nav-link" href="model.html"> Model</a>
+                  </li>
+                  <li class="nav-item ">
+                    <a class="nav-link" href="about.html"> About </a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </nav>
+        </div>
+      </header>
+      <!-- end header section -->
+    </div>
+
+
+<body>
+    <section class="model_section layout_padding">
+        <div class="container">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="detail-box">
+                <div class="heading_container">
+                    <h2>Pave the Way</h2>
+                </div>
+                <p>This webpage allows you to try out the YOLOv8 object detection model. You can upload an image and see the objects detected by the model.</p>
+              </div>       
+                        <input id="uploadInput" type="file"/>
+                        <button id="predictButton">Process</button>
+                        <div id="messageContainer"></div>
+         
+            
+                
+            </div>
+            
+
+        </div>
+
+
+    <canvas></canvas>
+    <script>
+      /**
+       * "Upload" button onClick handler: uploads selected image file
+       * to backend, receives array of detected objects
+       * and draws them on top of image
+       */
+       const input = document.getElementById("uploadInput");
+       const predictButton = document.getElementById("predictButton");
+       //const messageContainer = document.getElementById("messageContainer");
+       //const backButton = document.getElementById("backButton");
+       let boxes = [];
+       input.addEventListener("change",async(event) => {
+        //boxes = [];
+        draw_image(event.target.files[0], 720, 720); // resize the image to fixed
+        })
+/**
+        predictButton.addEventListener("click",async(event) => {
+            boxes = await detect_objects_on_image(input.files[0]);
+            draw_image_and_boxes(input.files[0],boxes, 640,640);
+        })
+        */
+        predictButton.addEventListener("click", async (event) => {
+          console.log("Predict button clicked")
+          // Display a message to inform the user that the image is being processed
+          const messageElement = document.createElement("p");
+          messageElement.textContent = "Processing image, please wait...";
+          const messageContainer = document.getElementById("messageContainer");
+          messageContainer.appendChild(messageElement);
+
+          // Process the image
+          boxes = await detect_objects_on_image(input.files[0]);
+          draw_image_and_boxes(input.files[0], boxes, 720, 720);
+          // Remove the message after the image has been processed
+          messageContainer.removeChild(messageElement);
+          //messageElement: console.log(document.body.innerHTML);
+        });
+
+
+
+        //messageContainer.appendChild(messageElement);
+
+            
+
+
+        async function detect_objects_on_image(buf) {
+            const [input,img_width,img_height] = await prepare_input(buf);
+            const output = await run_model(input);
+            return process_output(output,img_width,img_height);
+        }
+
+        async function prepare_input(buf) {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.src = URL.createObjectURL(buf);
+                img.onload = () => {
+                    const [img_width,img_height] = [img.width, img.height]
+                    const canvas = document.createElement("canvas");
+                    canvas.width = 640;
+                    canvas.height = 640;
+                    const context = canvas.getContext("2d");
+                    context.drawImage(img,0,0,640,640);
+                    const imgData = context.getImageData(0,0,640,640);
+                    const pixels = imgData.data;
+
+                    const red = [], green = [], blue = [];
+                    for (let index=0; index<pixels.length; index+=4) {
+                        red.push(pixels[index]/255.0);
+                        green.push(pixels[index+1]/255.0);
+                        blue.push(pixels[index+2]/255.0);
+                    }
+                    const input = [...red, ...green, ...blue];
+                    resolve([input, img_width, img_height])
+                }
+            })
+        }
+
+        async function run_model(input) {
+            const model = await ort.InferenceSession.create("best.onnx");
+            input = new ort.Tensor(Float32Array.from(input),[1, 3, 640, 640]);
+            const outputs = await model.run({images:input});
+            return outputs["output0"].data;
+        }
+
+
+
+        function process_output(output, img_width, img_height) {
+            let boxes = [];
+            for (let index=0;index<8400;index++) {
+                const [class_id,prob] = [...Array(80).keys()]
+                    .map(col => [col, output[8400*(col+4)+index]])
+                    .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
+                if (prob < 0.2) {
+                    continue;
+                }
+                const label = yolo_classes[class_id];
+                const xc = output[index];
+                const yc = output[8400+index];
+                const w = output[2*8400+index];
+                const h = output[3*8400+index];
+                const x1 = (xc-w/2)/640*img_width;
+                const y1 = (yc-h/2)/640*img_height;
+                const x2 = (xc+w/2)/640*img_width;
+                const y2 = (yc+h/2)/640*img_height;
+                boxes.push([x1,y1,x2,y2,label,prob]);
+             }
+
+            boxes = boxes.sort((box1,box2) => box2[5]-box1[5])
+            const result = [];
+            while (boxes.length>0) {
+                result.push(boxes[0]);
+                boxes = boxes.filter(box => iou(boxes[0],box)<0.7);
+            }
+            return result;
+        }
+
+        function iou(box1,box2) {
+            return intersection(box1,box2)/union(box1,box2);
+        }
+        function union(box1,box2) {
+            const [box1_x1,box1_y1,box1_x2,box1_y2] = box1;
+            const [box2_x1,box2_y1,box2_x2,box2_y2] = box2;
+            const box1_area = (box1_x2-box1_x1)*(box1_y2-box1_y1)
+            const box2_area = (box2_x2-box2_x1)*(box2_y2-box2_y1)
+            return box1_area + box2_area - intersection(box1,box2)
+        }
+
+        function intersection(box1,box2) {
+            const [box1_x1,box1_y1,box1_x2,box1_y2] = box1;
+            const [box2_x1,box2_y1,box2_x2,box2_y2] = box2;
+            const x1 = Math.max(box1_x1,box2_x1);
+            const y1 = Math.max(box1_y1,box2_y1);
+            const x2 = Math.min(box1_x2,box2_x2);
+            const y2 = Math.min(box1_y2,box2_y2);
+            return (x2-x1)*(y2-y1)
+        }
+
+        const yolo_classes = [
+            'very_poor', 'poor']
+
+      /**
+       * Function draws the image from provided file
+       * and bounding boxes of detected objects on
+       * top of the image
+       * @param file Uploaded file object
+       * @param boxes Array of bounding boxes in format [[x1,y1,x2,y2,object_type,probability],...]
+       */
+       function draw_image(file, maxWidth, maxHeight) {
+          const img = new Image();
+          img.src = URL.createObjectURL(file);
+          img.onload = () => {
+            const canvas = document.querySelector("canvas");
+            const widthRatio = maxWidth / img.width;
+            const heightRatio = maxHeight / img.height;
+            const ratio = Math.min(widthRatio, heightRatio);
+            canvas.width = img.width * ratio;
+            canvas.height = img.height * ratio;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+        }
+/**
+       function draw_image(file) {
+            const img = new Image();
+            img.src = URL.createObjectURL(file);
+            img.onload = () => {
+                const canvas = document.querySelector("canvas");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+             };
+        }
+        
+
+      function draw_image_and_boxes(file,boxes) {
+          const img = new Image()
+          img.src = URL.createObjectURL(file);
+          img.onload = () => {
+              const canvas = document.querySelector("canvas");
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img,0,0);
+              ctx.strokeStyle = "#00FF00";
+              ctx.lineWidth = 3;
+              ctx.font = "18px serif";
+              if (boxes.length === 0) {
+                ctx.fillStyle = "#008000";
+                ctx.fillText("No Detection", 10, 25);
+            } else {
+                boxes.forEach(([x1,y1,x2,y2,label]) => {
+                  ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+                  ctx.fillStyle = "#00ff00";
+                  const width = ctx.measureText(label).width;
+                  ctx.fillRect(x1,y1,width+10,25);
+                  ctx.fillStyle = "#000000";
+                  ctx.fillText(label, x1, y1+18);
+              });
+                }
+          }
+      }
+*/
+      function draw_image_and_boxes(file, boxes, maxWidth, maxHeight) {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = () => {
+          const canvas = document.querySelector("canvas");
+          const widthRatio = maxWidth / img.width;
+          const heightRatio = maxHeight / img.height;
+          const ratio = Math.min(widthRatio, heightRatio);
+          canvas.width = img.width * ratio;
+          canvas.height = img.height * ratio;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          ctx.strokeStyle = "#00FF00";
+          ctx.lineWidth = 3;
+          ctx.font = "18px serif";
+          if (boxes.length === 0) {
+            ctx.fillStyle = "#008000";
+            ctx.fillText("No Detection", 10, 25);
+          } else {
+              boxes.forEach(([x1, y1, x2, y2, label]) => {
+                x1 *= ratio;
+                y1 *= ratio;
+                x2 *= ratio;
+                y2 *= ratio;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                ctx.fillStyle = "#00ff00";
+                const width = ctx.measureText(label).width;
+                ctx.fillRect(x1, y1, width + 10, 25);
+                ctx.fillStyle = "#000000";
+                ctx.fillText(label, x1, y1 + 18);
+              });
+            }
+        };
+      }
+
+
+
+     
+
+    </script>
+</section>
+</body>
+<!-- end model section -->
+
+  <!-- info section -->
+
+  <section class="info_section layout_padding">
+    <div class="container">
+      <div class="info_contact">
+        <div class="row">
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/location-white.png" alt="">
+              <span>
+                Passages of Lorem Ipsum available
+              </span>
+            </a>
+          </div>
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/telephone-white.png" alt="">
+              <span>
+                Call : +012334567890
+              </span>
+            </a>
+          </div>
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/envelope-white.png" alt="">
+              <span>
+                demo@gmail.com
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-8 col-lg-9">
+          <div class="info_form">
+            <form action="">
+              <input type="text" placeholder="Enter your email">
+              <button>
+                subscribe
+              </button>
+            </form>
+          </div>
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <div class="info_social">
+            <div>
+              <a href="">
+                <img src="images/fb.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/twitter.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/linkedin.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/instagram.png" alt="">
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- end info section -->
+
+  <!-- footer section -->
+  <footer class="container-fluid footer_section">
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-7 col-md-9 mx-auto">
+          <p>
+             2023 All Rights Reserved By
+          </p>
+        </div>
+      </div>
+    </div>
+  </footer>
+  <!-- footer section -->
+
+
+  <script src="js/jquery-3.4.1.min.js"></script>
+  <script src="js/bootstrap.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <!-- Basic -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+
+  <title>Real-time Object Detection with ONNX.js</title>
+  <style>
+    /* Add your CSS styles here */
+    #output {
+      position: relative;
+    }
+    #output canvas, #output video {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+  </style>
+</head>
+
+
+
+<body>
+    <section class="model_section layout_padding">
+        <div class="container">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="detail-box">
+                <div class="heading_container">
+                    <h2>Pave the Way</h2>
+                </div>
+                <p>This webpage allows you to try out the YOLOv8 object detection model. You can upload an image and see the objects detected by the model.</p>
+              </div>       
+
+  
+         
+            
+                
+            </div>
+            
+            <div id="output">
+              <video id="video" width="640" height="640" autoplay></video>
+              <canvas id="canvas" width="640" height="640"></canvas>
+            </div>
+        </div>
+
+
+    <canvas></canvas>
+    <script>
+      
+
+      // Set up the video stream
+      const video = document.querySelector("#video");
+      navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+        video.srcObject = stream;
+        video.play();
+      });
+
+      // Set up the canvas
+      const canvas = document.querySelector("#canvas");
+      const ctx = canvas.getContext("2d");
+    // Load the ONNX model
+        let model;
+        ort.InferenceSession.create('best.onnx').then(m => {
+        model = m;
+        });
+      // Continuously capture and process frames from the video stream
+      setInterval(async () => {
+        // Draw the current frame on the canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Get the image data from the canvas
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        // Process the image data using your object detection model
+        const boxes = await detect_objects_on_image(imgData);
+  
+        // Draw the current frame and its corresponding bounding boxes on a canvas
+        draw_frame(video, boxes);
+      }, 100);
+
+    
+
+    
+    async function detect_objects_on_image(imgData) {
+        // Convert the image data to a tensor
+        const inputTensor = new ort.Tensor('float32', imgData.data, [1, imgData.height, imgData.width, 4]);
+
+        // Run object detection on the input tensor
+        const predictions = await model.run([inputTensor]);
+
+        // Convert the predictions to bounding boxes
+        const boxes = predictions[0].data.map(prediction => {
+            return {
+            x: prediction[0],
+            y: prediction[1],
+            width: prediction[2] - prediction[0],
+            height: prediction[3] - prediction[1],
+            class: prediction[4],
+            score: prediction[5]
+            };
+        });
+
+        return boxes;
+}
+
+
+        async function detect_objects_on_image(buf) {
+            const [input,img_width,img_height] = await prepare_input(buf);
+            const output = await run_model(input);
+            return process_output(output,img_width,img_height);
+        }
+
+        async function prepare_input(imgData) {
+            const [img_width, img_height] = [imgData.width, imgData.height];
+            const pixels = imgData.data;
+
+            const red = [], green = [], blue = [];
+            for (let index = 0; index < pixels.length; index += 4) {
+                red.push(pixels[index] / 255.0);
+                green.push(pixels[index + 1] / 255.0);
+                blue.push(pixels[index + 2] / 255.0);
+            }
+            const input = [...red, ...green, ...blue];
+            return [input, img_width, img_height];
+        }
+
+
+        async function run_model(input) {
+            const model = await ort.InferenceSession.create("best.onnx");
+              // Reshape the input data to have the same shape as the tensor
+            //const reshapedInput = tf.tensor3d(input, [1, 3, 640, 640]);
+            // Create a new tensor using the reshaped input data
+            //input = new ort.Tensor(reshapedInput.dataSync(), "float32", [1, 3, 640, 640]);
+             // Reshape the input data to have the same shape as the tensor
+           // const reshapedInput = tf.tensor3d(input, [640, 640, 3]);
+  
+            // Create a new tensor using the reshaped input data
+            //input = new ort.Tensor(reshapedInput.dataSync(), "float32", [1, 3, 640, 640]);
+            console.log(input.length)
+            input = new ort.Tensor(Float32Array.from(input),[1, 3, 640, 640]);
+            
+            const outputs = await model.run({images:input});
+            return outputs["output0"].data;
+        }
+
+
+
+        function process_output(output, img_width, img_height) {
+            let boxes = [];
+            for (let index=0;index<8400;index++) {
+                const [class_id,prob] = [...Array(80).keys()]
+                    .map(col => [col, output[8400*(col+4)+index]])
+                    .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
+                if (prob < 0.2) {
+                    continue;
+                }
+                const label = yolo_classes[class_id];
+                const xc = output[index];
+                const yc = output[8400+index];
+                const w = output[2*8400+index];
+                const h = output[3*8400+index];
+                const x1 = (xc-w/2)/640*img_width;
+                const y1 = (yc-h/2)/640*img_height;
+                const x2 = (xc+w/2)/640*img_width;
+                const y2 = (yc+h/2)/640*img_height;
+                boxes.push([x1,y1,x2,y2,label,prob]);
+             }
+
+            boxes = boxes.sort((box1,box2) => box2[5]-box1[5])
+            const result = [];
+            while (boxes.length>0) {
+                result.push(boxes[0]);
+                boxes = boxes.filter(box => iou(boxes[0],box)<0.7);
+            }
+            return result;
+        }
+
+        function iou(box1,box2) {
+            return intersection(box1,box2)/union(box1,box2);
+        }
+        function union(box1,box2) {
+            const [box1_x1,box1_y1,box1_x2,box1_y2] = box1;
+            const [box2_x1,box2_y1,box2_x2,box2_y2] = box2;
+            const box1_area = (box1_x2-box1_x1)*(box1_y2-box1_y1)
+            const box2_area = (box2_x2-box2_x1)*(box2_y2-box2_y1)
+            return box1_area + box2_area - intersection(box1,box2)
+        }
+
+        function intersection(box1,box2) {
+            const [box1_x1,box1_y1,box1_x2,box1_y2] = box1;
+            const [box2_x1,box2_y1,box2_x2,box2_y2] = box2;
+            const x1 = Math.max(box1_x1,box2_x1);
+            const y1 = Math.max(box1_y1,box2_y1);
+            const x2 = Math.min(box1_x2,box2_x2);
+            const y2 = Math.min(box1_y2,box2_y2);
+            return (x2-x1)*(y2-y1)
+        }
+
+        const yolo_classes = [
+            'very_poor', 'poor']
+
+   
+
+       function draw_image(file) {
+            const img = new Image();
+            img.src = URL.createObjectURL(file);
+            img.onload = () => {
+                const canvas = document.querySelector("canvas");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+             };
+        }
+        
+
+      function draw_image_and_boxes(file,boxes) {
+          const img = new Image()
+          img.src = URL.createObjectURL(file);
+          img.onload = () => {
+              const canvas = document.querySelector("canvas");
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img,0,0);
+              ctx.strokeStyle = "#00FF00";
+              ctx.lineWidth = 3;
+              ctx.font = "18px serif";
+              if (boxes.length === 0) {
+                ctx.fillStyle = "#008000";
+                ctx.fillText("No Detection", 10, 25);
+            } else {
+                boxes.forEach(([x1,y1,x2,y2,label]) => {
+                  ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+                  ctx.fillStyle = "#00ff00";
+                  const width = ctx.measureText(label).width;
+                  ctx.fillRect(x1,y1,width+10,25);
+                  ctx.fillStyle = "#000000";
+                  ctx.fillText(label, x1, y1+18);
+              });
+                }
+          }
+      }
+
+      function draw_frame(video, boxes) {
+        const canvas = document.querySelector("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0);
+
+        ctx.strokeStyle = "#00FF00";
+        ctx.lineWidth = 3;
+        ctx.font = "18px serif";
+        if (boxes.length === 0) {
+            ctx.fillStyle = "#008000";
+            ctx.fillText("No Detection", 10, 25);
+        } else {
+            boxes.forEach(([x1, y1, x2, y2, label]) => {
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.fillStyle = "#00ff00";
+            const width = ctx.measureText(label).width;
+            ctx.fillRect(x1, y1, width + 10, 25);
+            ctx.fillStyle = "#000000";
+            ctx.fillText(label, x1, y1 + 18);
+            });
+        }
+    }
+
+
+
+
+     
+
+    </script>
+</section>
+</body>
+<!-- end model section -->
+
+  <!-- info section -->
+
+  <section class="info_section layout_padding">
+    <div class="container">
+      <div class="info_contact">
+        <div class="row">
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/location-white.png" alt="">
+              <span>
+                Passages of Lorem Ipsum available
+              </span>
+            </a>
+          </div>
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/telephone-white.png" alt="">
+              <span>
+                Call : +012334567890
+              </span>
+            </a>
+          </div>
+          <div class="col-md-4">
+            <a href="">
+              <img src="images/envelope-white.png" alt="">
+              <span>
+                demo@gmail.com
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-8 col-lg-9">
+          <div class="info_form">
+            <form action="">
+              <input type="text" placeholder="Enter your email">
+              <button>
+                subscribe
+              </button>
+            </form>
+          </div>
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <div class="info_social">
+            <div>
+              <a href="">
+                <img src="images/fb.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/twitter.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/linkedin.png" alt="">
+              </a>
+            </div>
+            <div>
+              <a href="">
+                <img src="images/instagram.png" alt="">
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- end info section -->
+
+  <!-- footer section -->
+  <footer class="container-fluid footer_section">
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-7 col-md-9 mx-auto">
+          <p>
+             2023 All Rights Reserved By
+          </p>
+        </div>
+      </div>
+    </div>
+  </footer>
+  <!-- footer section -->
+
+
+  <script src="js/jquery-3.4.1.min.js"></script>
+  <script src="js/bootstrap.js"></script>
+
+</body>
+
+</html>
