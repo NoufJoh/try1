@@ -51,12 +51,16 @@
     <script>
       
 
+
       // Set up the video stream
       const video = document.querySelector("#video");
-      navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: "environment" } }
+      }).then(stream => {
         video.srcObject = stream;
         video.play();
       });
+
 
       // Set up the canvas
       const canvas = document.querySelector("#canvas");
